@@ -6,3 +6,6 @@ MMPB_utils_jake/
 Ovis/
 .nfs008800000004fc0200000003
 temp/
+huggingface/
+conda_envs/
+MMPB.tar.gz

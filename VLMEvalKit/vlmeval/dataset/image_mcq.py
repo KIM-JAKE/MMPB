@@ -1145,7 +1145,10 @@ class MMPB(ImageBaseDataset):
         #     self.total_preferences = json.load(file)
 
         self.data = load(self.data_path)        
-        # self.data = self.data[(self.data['attribute'] == 'human') & (self.data['category'] == 'preference') & (self.data['l2-category'] == 'awareness')]
+        # self.data = self.data[(self.data['attribute'] == 'human') & (self.data['category'] == 'preference') & (self.data['l2-category'] != "inconsistency")]
+        # For testing WandB
+        # self.data = self.data.iloc[:2]
+        print(self.data)
         self.meta_only = False
     
     def dump_image(self, line):        

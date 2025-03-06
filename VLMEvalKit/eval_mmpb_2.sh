@@ -13,7 +13,7 @@
 # torchrun --nproc-per-node=8 run.py --data MMBench_DEV_EN MME SEEDBench_IMG --model idefics_80b_instruct qwen_chat mPLUG-Owl2 --verbose
 # # Qwen-VL-Chat on MME. On a node with 2 GPU. Inference and Evaluation.
 # torchrun --nproc-per-node=2 run.py --data MME --model qwen_chat --verbose
-
+# torchrun --nproc-per-node=2 run.py --data MMPB --model deepseek_vl2 --verbose
 ### For our evaluation
 
 # # llava 1.5 (vlm_37)
@@ -36,6 +36,7 @@
 
 # qwen2.5 (vlm_latest)
 CUDA_VISIBLE_DEVICES=2 python run.py --data MMPB --model Qwen2.5-VL-7B-Instruct --verbose
+CUDA_VISIBLE_DEVICES=2 python run.py --data MMPB --model Qwen2-VL-7B-Instruct --verbose
 
 # # gpt4o (vlm_latest)
 # CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model GPT4o --verbose

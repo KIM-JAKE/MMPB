@@ -3,6 +3,9 @@ import json
 import torch
 import torch.distributed as dist
 
+import wandb
+import sys
+
 from vlmeval.config import supported_VLM
 from vlmeval.dataset.video_dataset_config import supported_video_datasets
 from vlmeval.dataset import build_dataset
@@ -149,6 +152,41 @@ You can launch the evaluation by setting either --data and --model or --config.
     # Reuse-aux: if set, when reuse is True, will also reuse the auxiliary evaluation files
     parser.add_argument('--reuse-aux', type=bool, default=True, help='reuse auxiliary evaluation files')
 
+
+    ##### for our experiments #####
+    parser.add_argument('--wandb_exp_name', type=str, default="default")
+
+    # injection prompts
+    parser.add_argument('--injection_prompt_description_first', type=bool, default=True, help='if true, description+preference, else preference+description')
+    parser.add_argument('--injection_explicit_prompt', type=bool, default=False, help='if true, inject explicit prompt')
+    parser.add_argument('--injection_prompt_type', type=str, default="hard_moderate", help='hard_simple, hard_moderate, hard_detailed, image')
+    parser.add_argument('--injection_prompt_n_concepts', type=int, default=1, help='number of concepts to input')
+    parser.add_argument('--injection_prompt_n_images', type=int, default=5, help='only for image propting, ranging from 1~5')
+    parser.add_argument('--injection_prompt_location', type=str, default="start", help='start, middle, end')
+
+    # multi-turn generic prompts
+    parser.add_argument('--generic_conversation_type', type=str, default="text", help='text, vision, concept')
+    parser.add_argument('--generic_conversation_n_turn', type=int, default=5, help='1~10')
+
+    # prompting methods
+    parser.add_argument(
+        '--prompting_methods', type=str,
+        choices=[
+            "zero_shot",
+            "remind_zero_shot",
+            "zero_shot_cot",
+            "few_shot",
+            "few_shot_cot",
+            "self_critiq",
+            "panelgpt",
+            "rag"
+        ],
+        default="zero_shot",
+        help='Choose a prompting method right before the inference from: Zero-shot, Remind + Zero-shot, Zero-shot CoT, Few-shot, Few-shot CoT, Self-critic, PanelGPT, RAG'
+    )
+    
+    
+
     args = parser.parse_args()
     return args
 
@@ -193,6 +231,13 @@ def main():
         )
 
     for _, model_name in enumerate(args.model):
+
+        wandb.init(
+            project=args.wandb_exp_name, # Project name
+            name=model_name,         
+            reinit=True              
+        )
+
         model = None
         date, commit_id = timestr('day'), githash(digits=8)
         eval_id = f"T{date}_G{commit_id}"
@@ -407,11 +452,15 @@ def main():
                         logger.info(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
                         logger.info('Evaluation Results:')
                         if isinstance(eval_results, dict):
+                            wandb.log(eval_results)
                             logger.info('\n' + json.dumps(eval_results, indent=4))
                         elif isinstance(eval_results, pd.DataFrame):
                             if len(eval_results) < len(eval_results.columns):
                                 eval_results = eval_results.T
                             logger.info('\n' + tabulate(eval_results))
+                            # Logging WandB
+                            result_dict = eval_results.iloc[1:, 0].to_dict()
+                            wandb.log(result_dict)
 
                     # Restore the proxy
                     if eval_proxy is not None:
@@ -432,7 +481,7 @@ def main():
                 logger.exception(f'Model {model_name} x Dataset {dataset_name} combination failed: {e}, '
                                  'skipping this combination.')
                 continue
-
+        wandb.finish()
     if world_size > 1:
         dist.destroy_process_group()
 

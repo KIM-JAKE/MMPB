@@ -1,13 +1,13 @@
 import wandb
 import pandas as pd
 
-wandb.init(project="MMPB_v1",name='Exp_v1')
+# wandb.init(project="MMPB_v1")
 
-df = pd.read_excel("/workspace/jaeik/MMPB/utils_building_MMPB/concatenated_models.xlsx")
+df = pd.read_excel("/workspace/VLMEvalKit/outputs/outputs0306.xlsx")
 
 loaded_experiment_df = df
 
-PROJECT_NAME = "MMPB_v1"
+PROJECT_NAME = "MMPB0306"
 
 EXPERIMENT_NAME_COL = "model"
 METRIC_COLS = [col for col in loaded_experiment_df.columns if col != "model"]

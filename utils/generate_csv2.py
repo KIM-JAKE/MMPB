@@ -2,6 +2,8 @@ import json
 import csv
 import os
 import random
+from collections import defaultdict
+import numpy as np
 
 def load_json(json_file):
     """Load JSON data from a given file."""
@@ -25,13 +27,26 @@ PARAPHRASES = [
     "Does this image connect to <sks>'s positive or negative preferences? Answer with Yes or No.",
     "Is the content of this image associated with <sks>'s likes or dislikes? Answer with either Yes or No.",
     "Does this image pertain to <sks>'s favorable or unfavorable inclinations? Please answer Yes or No.",
-    "Is this image connected to what  <sks> prefers or dislikes? Answer Yes or No.",
+    "Is this image connected to what  <sks> prefers or dislikes? Answer Yes or No.",
     "Is the image linked to <sks>'s positive or negative taste? Answer with either Yes or No.",
     "Does this picture relate to <sks>'s positive or negative leanings? Please respond with Yes or No.",
     "Does this image correlate with <sks>'s positive or negative orientation? Answer with either Yes or No.",
     "Is the image reflective of <sks>'s positive or negative preference? Please reply with Yes or No.",
     "Is the image tied to <sks>’s positive or negative liking? Respond with either Yes or No.",
     "Does this image correlate with <sks>'s positive or negative preference? Answer with either Yes or No.",
+]
+
+NEGATIVE_PARAPHRASES = [
+    "Is this image not connected to <sks>'s positive or negative preferences? Answer with Yes or No.",
+    "Is the content of this image not associated with <sks>'s likes or dislikes? Answer with either Yes or No.",
+    "Does this image not pertain to <sks>'s favorable or unfavorable inclinations? Please answer Yes or No.",
+    "Is this image not connected to what <sks> prefers or dislikes? Answer Yes or No.",
+    "Is the image not linked to <sks>'s positive or negative taste? Answer with either Yes or No.",
+    "Does this picture not relate to <sks>'s positive or negative leanings? Please respond with Yes or No.",
+    "Does this image not correlate with <sks>'s positive or negative orientation? Answer with either Yes or No.",
+    "Is the image not reflective of <sks>'s positive or negative preference? Please reply with Yes or No.",
+    "Is the image not tied to <sks>’s positive or negative liking? Respond with either Yes or No.",
+    "Does this image not correlate with <sks>'s positive or negative preference? Answer with either Yes or No.",
 ]
 
 BASE_QUERY = "Is this image related to <sks>'s positive or negative preference? Answer with either ‘Yes’ or ‘No’."
@@ -49,9 +64,18 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
             for image_path, queries in images.items():
                 if isinstance(queries, list):  
                     for details in queries:
+                        # 만약 Query가 BASE_QUERY와 같다면 paraphrasing 진행
                         if details.get("Query", "") == BASE_QUERY:
-                            details["Query"] = random.choice(PARAPHRASES)
-                        
+                            if random.choice([True, False]):
+                                details["Query"] = random.choice(NEGATIVE_PARAPHRASES)
+                                if l2_category == "awareness":
+                                    details["Answer"] = "No"
+                                elif l2_category == "overconcept":
+                                    details["Answer"] = "Yes"
+                                else:
+                                    details["Answer"] = details.get("Answer", "")
+                            else:
+                                details["Query"] = random.choice(PARAPHRASES)
                         row = [
                             index,  # index
                             details["Query"],  # question
@@ -75,9 +99,17 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
                         shuffled_choices = ["", "", "", ""]
                         new_answer = queries.get("Answer", "")
                     
-                    
                     if queries.get("Query", "") == BASE_QUERY:
-                        queries["Query"] = random.choice(PARAPHRASES)
+                        if random.choice([True, False]):
+                            queries["Query"] = random.choice(NEGATIVE_PARAPHRASES)
+                            if l2_category == "awareness":
+                                new_answer = "No"
+                            elif l2_category == "overconcept":
+                                new_answer = "Yes"
+                            else:
+                                new_answer = queries.get("Answer", "")
+                        else:
+                            queries["Query"] = random.choice(PARAPHRASES)
                     
                     row = [
                         index,  # index
@@ -144,5 +176,5 @@ def json_to_csv(base_path, preferences_file, descriptions_file, csv_file):
 base_path = "/workspace/MMPB"
 preferences_file = "/workspace/MMPB/human/formatted_preferences_full.json"
 descriptions_file = "/workspace/MMPB/formatted_descriptions_full.json"
-csv_file = "/workspace/MMPB/dataset2.csv"
+csv_file = "/workspace/MMPB/dataset3.csv"
 json_to_csv(base_path, preferences_file, descriptions_file, csv_file)

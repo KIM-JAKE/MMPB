@@ -12,7 +12,7 @@
 # # IDEFICS-9B-Instruct, Qwen-VL-Chat, mPLUG-Owl2 on MMBench_DEV_EN, MME, and SEEDBench_IMG. On a node with 8 GPU. Inference and Evaluation.
 # torchrun --nproc-per-node=8 run.py --data MMBench_DEV_EN MME SEEDBench_IMG --model idefics_80b_instruct qwen_chat mPLUG-Owl2 --verbose
 # # Qwen-VL-Chat on MME. On a node with 2 GPU. Inference and Evaluation.
-# torchrun --nproc-per-node=2 run.py --data MME --model qwen_chat --verbose
+# torchrun --nproc-per-node=3 run.py --data MMPB --model Qwen2.5-VL-7B-Instruct --verbose
 
 ### For our evaluation
 
@@ -33,6 +33,7 @@ CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model llava-onevision-qwen2-7
 CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model InternVL2_5-8B-MPO --verbose
 CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model InternVL2_5-26B-MPO --verbose
 CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model InternVL2_5-38B-MPO --verbose
+CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model InternVL2_5-78B-MPO --verbose --wandb_exp_name="0306"
 
 # qwen2.5 (vlm_latest)
 CUDA_VISIBLE_DEVICES=0 python run.py --data MMPB --model Qwen2.5-VL-7B-Instruct --verbose
