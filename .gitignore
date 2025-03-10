@@ -9,3 +9,5 @@ temp/
 huggingface/
 conda_envs/
 MMPB.tar.gz
+Miniconda3-latest-Linux-x86_64.sh
+VLMEvalKit/wandb/

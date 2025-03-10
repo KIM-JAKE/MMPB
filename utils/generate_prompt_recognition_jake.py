@@ -4,13 +4,16 @@ import argparse
 import pandas as pd
 from PIL import Image, UnidentifiedImageError
 from ovis.serve.runner import RunnerArguments, OvisRunner
+import tqdm
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--prompt_level', type=str, default="detail", choices=["simple", "moderate", "detail"],
                     help='Choose the prompt level: simple, moderate, or detail.')
+parser.add_argument('--attribute', type=str, default="object", choices=["human", "character", "object", "animal"],
+                    help='Choose attribute.')
 args = parser.parse_args()
 
-attribute = "object"
+attribute = args.attribute
 
 base_dir = f"/workspace/MMPB/{attribute}/train"
 
@@ -22,39 +25,39 @@ runner = OvisRunner(runner_args)
 prompt_texts = {
     # Todo
     "simple": {
-        "human": "Describe <sks> briefly.",
-        "animal": "Describe <sks> briefly.",
-        "object": "Describe <sks> briefly.",
-        "character": "Describe <sks> briefly."
+        "human": "Analyze the five provided images, all depicting the same person. Based on your analysis, generate 3 concise keywords that best summarize their identity, appearance, or distinguishing features. Provide your answer strictly in the format: <sks> is <keyword1>, <keyword2>, <keyword3>.",
+        "animal": "Analyze the five provided images, all depicting the same animal. Based on your analysis, generate 3 concise keywords that best summarize their identity, appearance, or distinguishing features. Provide your answer strictly in the format: <sks> is <keyword1>, <keyword2>, <keyword3>.",
+        "object": "Analyze the five provided images, all depicting the same object. Based on your analysis, generate 3 concise keywords that best summarize their identity, appearance, or distinguishing features. Provide your answer strictly in the format: <sks> is <keyword1>, <keyword2>, <keyword3>.",
+        "character": "Analyze the five provided images, all depicting the same character. Based on your analysis, generate 3 concise keywords that best summarize their identity, appearance, or distinguishing features. Provide your answer strictly in the format: <sks> is <keyword1>, <keyword2>, <keyword3>."
     },
     # Todo
     "moderate": {
-        "human": "Provide a moderate description of <sks>, focusing on main features.",
-        "animal": "Provide a moderate description of <sks>, focusing on main features.",
-        "object": "Provide a moderate description of <sks>, focusing on main features.",
-        "character": "Provide a moderate description of <sks>, focusing on main features."
+        "human": "Describe the person in the five images, highlighting their key physical traits and distinguishing features in a single sentence. Name the person as <sks> and ensure the description uses '<sks>' naturally throughout.",
+        "animal": "Describe the animal in the five images, focusing on its species, physical characteristics, and notable features in a single sentence. Name the animal as <sks> and ensure the description uses '<sks>' naturally throughout.",
+        "object": "Describe the object in the five images, summarizing its type, shape, color, and key attributes in a single sentence. Name the object as <sks> and ensure the description uses '<sks>' naturally throughout.",
+        "character": "Describe the character in the five images, emphasizing their appearance, outfit, and defining traits in a single sentence. Name the character as <sks> and ensure the description uses '<sks>' naturally throughout."
     },
     "detail": {
-        "human": ("Observe the person across all five images and provide a single, unified description of <sks>. "
+        "human": ("Carefully observe the person across all five images and provide a single, unified description of <sks>. "
                   "Name the person as <sks> and ensure the description uses '<sks>' naturally throughout. "
                   "Focus on consistent traits rather than describing each image separately. "
                   "Describe <sks>'s physical appearance, clothing style, and distinguishing features in a single paragraph."),
-        "animal": ("Observe the animal across all five images and provide a single, unified description of <sks>. "
+        "animal": ("Carefully observe the animal across all five images and provide a single, unified description of <sks>. "
                    "Name the species as <sks> and ensure the description uses '<sks>' naturally throughout. "
                    "Focus on consistent traits rather than describing each image separately. "
                    "Describe <sks>'s species, physical appearance, and distinguishing features in a single paragraph."),
-        "object": ("Observe the object across all five images and provide a single, unified description of <sks>. "
+        "object": ("Carefully observe the object across all five images and provide a single, unified description of <sks>. "
                    "Name the object as <sks> and ensure the description uses '<sks>' naturally throughout. "
                    "Focus on consistent traits rather than describing each image separately. "
                    "Describe <sks>'s type, physical appearance, and distinguishing features in a single paragraph."),
-        "character": ("Observe the character across all five images and provide a single, unified description of <sks>. "
+        "character": ("Carefully observe the character across all five images and provide a single, unified description of <sks>. "
                       "Name the character as <sks> and ensure the description uses '<sks>' naturally throughout. "
                       "Focus on consistent traits rather than describing each image separately. "
                       "Describe <sks>'s physical appearance, outfit, and distinguishing features in a single paragraph.")
     }
 }
 
-text = prompt_texts.get(args.prompt_level, {}).get(attribute, "Unknown category")
+prompt_text = prompt_texts.get(args.prompt_level, {}).get(attribute, "Unknown category")
 
 # List to store the results
 results = []
@@ -86,16 +89,17 @@ for person in sorted(os.listdir(base_dir)):
             
             # Store the results
             results.append({"person": person, "description": description})
+            print(results)
         else:
             print(f"Skipping {person} due to missing or invalid images.")
 
 # Save as JSON
-json_output_path = f"/workspace/MMPB/{attribute}/descriptions.json"
+json_output_path = f"/workspace/MMPB/{attribute}/descriptions_{args.prompt_level}.json"
 with open(json_output_path, "w", encoding="utf-8") as f:
     json.dump(results, f, indent=4, ensure_ascii=False)
 
 # Save as CSV
-csv_output_path = f"/workspace/MMPB/{attribute}/descriptions.csv"
+csv_output_path = f"/workspace/MMPB/{attribute}/descriptions_{args.prompt_level}.csv"
 df = pd.DataFrame(results)
 df.to_csv(csv_output_path, index=False, encoding="utf-8")
 

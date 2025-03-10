@@ -294,12 +294,14 @@ class InternVLChat(BaseModel):
         return history, image_path, image_cnt
 
     def chat_inner_v2(self, message, dataset=None):
-
         if len(message) > 1:
             history, image_path, image_cnt = self.build_history(message[:-1])
         else:
             history, image_path, image_cnt = None, [], 1
         current_msg = message[-1]
+
+        # print(current_msg)
+
         question = ''
 
         # If message is just text in the conversation
@@ -328,7 +330,7 @@ class InternVLChat(BaseModel):
         elif image_cnt == 1:
             upscale_flag = listinstr(['MMMU_DEV_VAL'], dataset)
             pixel_values = load_image(
-                image_path, max_num=self.max_num, upscale=upscale_flag).to(self.device).to(torch.bfloat16)
+                image_path[0], max_num=self.max_num, upscale=upscale_flag).to(self.device).to(torch.bfloat16)
             num_patches_list = [pixel_values.size(0)]
         else:
             pixel_values = None

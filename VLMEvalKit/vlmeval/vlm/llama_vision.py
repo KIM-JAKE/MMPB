@@ -184,16 +184,53 @@ class llama_vision(BaseModel):
         return message
 
     def generate_inner(self, message, dataset=None):
-        prompt, image_path = self.message_to_promptimg(message, dataset=dataset)
+        prompt, image_paths = self.message_to_promptimg(message, dataset=dataset)
 
-        image = Image.open(image_path)
-        messages = [
-            {'role': 'user', 'content': [
-                {'type': 'image'},
-                {'type': 'text', 'text': prompt}
-            ]}
+        # image = [Image.open(image_path) for image_path in image_paths]
+        images = [] 
+        for img_list in image_paths :
+            if img_list:  # only extend if the list is non-empty
+                images.extend(img_list)
+        image = [Image.open(image_path) for image_path in images]   
+        
+        messages_inj = [
+            {
+                'role': 'user',
+                'content': (
+                [{'type': 'image'} for p in image_paths[0]] +
+                [{'type': 'text', 'text': prompt[0]}]
+            )},
+            {
+                'role': 'assistant', 
+                'content' : [{'type': 'text', 'text': 'I got it.'}]
+            }
         ]
+
+        # TODO: VQA multi-turn
+        messages_mult = []
+        roles = ["user", "assistant"]
+        role_idx = 0  
+        for msg in prompt[1]:
+            messages_mult.append({
+                "role": roles[role_idx % 2], 
+                "content": [{"type": "text", "text": msg}]
+            })
+            role_idx += 1 
+
+        messages_eval= [
+            {
+                "role": "user",
+                "content": [{"type": "image"},
+                            {"type": "text", "text": prompt[2]}],
+            }
+        ]
+
+        messages = messages_inj + messages_mult + messages_eval
+
         input_text = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        
+        print(input_text)
+
         inputs = self.processor(image, input_text, return_tensors='pt').to(self.device)
         if not self.use_custom_prompt(dataset):
             if dataset is not None and DATASET_TYPE(dataset) in ['MCQ', 'Y/N']:

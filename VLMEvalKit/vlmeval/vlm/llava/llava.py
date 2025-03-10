@@ -144,6 +144,7 @@ class LLaVA(BaseModel):
 
         prompt = self.system_prompt
         images = []
+
         for utter in message:
             prompt += "USER: " if utter["role"] == "user" else "ASSISTANT: "
             content, images_sub = self.concat_tilist(utter["content"])
@@ -152,6 +153,8 @@ class LLaVA(BaseModel):
             prompt += " " if utter["role"] == "user" else self.stop_str
         assert message[-1]["role"] == "user", message
         prompt += "ASSISTANT: "
+
+        print(prompt)
 
         images = [Image.open(s).convert("RGB") for s in images]
         args = abstractproperty()
@@ -205,6 +208,7 @@ class LLaVA(BaseModel):
             image_tensor = None
 
         prompt = self.system_prompt + "USER: " + content + " ASSISTANT: "
+        # print(prompt)
 
         input_ids = (
             tokenizer_image_token(
@@ -244,7 +248,6 @@ class LLaVA_Next(BaseModel):
             AutoProcessor,
             LlavaForConditionalGeneration,
         )
-
         self.model_path = model_path
         if "34b" in model_path.lower():
             self.processor = LlavaNextProcessor.from_pretrained(
@@ -254,6 +257,7 @@ class LLaVA_Next(BaseModel):
             self.processor = AutoProcessor.from_pretrained(self.model_path)
         else:
             self.processor = LlavaNextProcessor.from_pretrained(self.model_path)
+        
         flash_attn_flag = False
         try:
             import flash_attn
@@ -287,6 +291,11 @@ class LLaVA_Next(BaseModel):
                     self.model_path, torch_dtype=torch.float16, low_cpu_mem_usage=True
                 )
 
+        self.system_prompt = (
+            "A chat between a curious human and an artificial intelligence assistant. "
+            "The assistant gives helpful, detailed, and polite answers to the human's questions. "
+        )
+        
         model = model.eval()
         self.model = model.cuda()
         kwargs_default = dict(
@@ -327,9 +336,11 @@ class LLaVA_Next(BaseModel):
         if "[/INST]" in answer:
             answer = answer.split("[/INST]")[1].strip()
         elif "ASSISTANT:" in answer:
-            answer = answer.split("ASSISTANT:")[1].strip()
+            # answer = answer.split("ASSISTANT:")[1].strip()
+            answer = answer.rsplit("ASSISTANT:", 1)[-1].strip()  
         elif "assistant\n" in answer:
-            answer = answer.split("assistant\n")[1].strip()
+            # answer = answer.split("assistant\n")[1].strip()
+            answer = answer.rsplit("assistant\n", 1)[-1].strip()
         elif "<|end_header_id|>\n\n" in answer:
             answer = answer.split("<|end_header_id|>\n\n")[2].strip()
 
@@ -367,7 +378,7 @@ class LLaVA_Next(BaseModel):
         for key, item in options.items():
             question += f"\n{key}. {item}"
         prompt = question
-        print(f"prompt: {prompt}")
+        # print(f"prompt: {prompt}")
 
         if len(options):
             prompt += (
@@ -384,27 +395,134 @@ class LLaVA_Next(BaseModel):
         message = [dict(type="image", value=s) for s in tgt_path]
         message.append(dict(type="text", value=prompt))
         return message
+    
+    def format_mult_prompt(self,mult_prompt):
+        tokens = mult_prompt.split(" ")
+        formatted_tokens = []
+        current_role = None
+
+        if "34b" in self.model_path : 
+            for token in tokens:
+                if token == "USER:":
+                    if current_role == "ASSISTANT":
+                        formatted_tokens.append("<|im_end|>")
+                    formatted_tokens.append("<|im_start|> USER:")
+                    current_role = "USER"
+                elif token == "ASSISTANT:":
+                    formatted_tokens.append("ASSISTANT:")
+                    current_role = "ASSISTANT"
+                else:
+                    formatted_tokens.append(token)
+
+            if current_role == "ASSISTANT":
+                formatted_tokens.append("<|im_end|>")
+        else:
+            for token in tokens:
+                if token == "USER:":
+                    if current_role == "ASSISTANT":
+                        formatted_tokens.append("</s>")
+                    formatted_tokens.append("<s> USER:")
+                    current_role = "USER"
+                elif token == "ASSISTANT:":
+                    formatted_tokens.append("ASSISTANT:")
+                    current_role = "ASSISTANT"
+                else:
+                    formatted_tokens.append(token)
+
+            if current_role == "ASSISTANT":
+                formatted_tokens.append("</s>")
+
+        return " ".join(formatted_tokens)
 
     def generate_inner(self, message, dataset=None):
-        content, images = [], []
-        for msg in message:
+
+        content_inj, images_inj = [], []
+        content_mult, images_mult = [], []
+        content_eval, images_eval = [], []
+
+        ## Todo : Check VQA Multi-turn
+
+        # Injection
+        for msg in message[0]: 
             if msg["type"] == "text":
-                content.append({"type": msg["type"], "text": msg["value"]})
+                content_inj.append({"type": msg["type"], "text": msg["value"]})
             else:
-                content.append({"type": "image"})
-                images.append(Image.open(msg["value"]).convert("RGB"))
-        conversation = [
+                content_inj.append({"type": "image"})
+                images_inj.append(Image.open(msg["value"]).convert("RGB"))       
+        
+        # Multi-turn
+        message_mult = [item for sublist in message[1] for item in sublist]
+        for msg in message_mult: 
+            if msg["type"] == "text":
+                content_mult.append({"type": msg["type"], "text": msg["value"]})
+            else:
+                content_mult.append({"type": "image"})
+                images_mult.append(Image.open(msg["value"]).convert("RGB"))     
+        # Eval
+        for msg in message[2]: 
+            if msg["type"] == "text":
+                content_eval.append({"type": msg["type"], "text": msg["value"]})
+            else:
+                content_eval.append({"type": "image"})
+                images_eval.append(Image.open(msg["value"]).convert("RGB"))  
+
+        # Injection
+        conversation_inj = [
             {
                 "role": "user",
-                "content": content,
+                "content": content_inj,
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I got it."}]
+            },
+        ]
+        # Multi-turn
+        conversation_mult = []
+        roles = ["user", "assistant"]
+        for i, msg in enumerate(content_mult):
+            role = roles[i % 2]
+            conversation_mult.append({
+                "role": role, 
+                "content": [msg],  
+            })
+                        
+        # Eval
+        conversation_eval= [
+            {
+                "role": "user",
+                "content": content_eval,
             }
         ]
-        prompt = self.processor.apply_chat_template(
-            conversation, add_generation_prompt=True
-        )
-        inputs = self.processor(prompt, images, return_tensors="pt").to(
+        
+        inj_prompt = self.processor.apply_chat_template(conversation_inj, add_generation_prompt=False)
+
+        if content_mult != []:
+            mult_prompt = self.processor.apply_chat_template(conversation_mult, add_generation_prompt=False)
+        else:
+            mult_prompt = ""
+
+        eval_prompt = self.processor.apply_chat_template(conversation_eval, add_generation_prompt=True)
+
+        ## Processing multi-turn conversations
+        mult_prompt = self.format_mult_prompt(mult_prompt)
+        # Yi
+        if "34b" in self.model_path: 
+            total_prompt = inj_prompt + mult_prompt + eval_prompt
+        else: 
+            total_prompt = inj_prompt+"</s>"+ mult_prompt + "<s>" + eval_prompt
+
+        print(total_prompt)
+
+        image_list = []
+        for img_list in [images_inj, images_mult, images_eval]:
+            if img_list:  # only extend if the list is non-empty
+                image_list.extend(img_list)
+
+        inputs = self.processor(total_prompt, image_list , return_tensors="pt").to(
             "cuda", torch.float16
         )
+
         output = self.model.generate(**inputs, **self.kwargs)
         answer = self.processor.decode(output[0], skip_special_token=True)
         answer = self.output_process(answer)
@@ -436,8 +554,9 @@ class LLaVA_Next2(BaseModel):
 
         model_name = get_model_name_from_path(model_path)
         tokenizer, model, image_processor, _ = load_pretrained_model(
-            model_path, None, model_name, device_map=None
+            model_path, None, model_name, device_map=None,
         )
+
         model.cuda().eval()
         model.tie_weights()
 
@@ -804,32 +923,118 @@ class LLaVA_OneVision_HF(BaseModel):
         self.fps = 1
         self.model_path = model_path
 
+    def format_mult_prompt(self, mult_prompt):
+        tokens = mult_prompt.split(" ")
+        formatted_tokens = []
+        current_role = None
+
+        for token in tokens:
+            if token == "USER:":
+                if current_role == "ASSISTANT":
+                    formatted_tokens.append("<|im_end|>")
+                formatted_tokens.append("<|im_start|> USER:")
+                current_role = "USER"
+            elif token == "ASSISTANT:":
+                formatted_tokens.append("ASSISTANT:")
+                current_role = "ASSISTANT"
+            else:
+                formatted_tokens.append(token)
+
+        if current_role == "ASSISTANT":
+            formatted_tokens.append("<|im_end|>")
+
+        return " ".join(formatted_tokens)
+    
     def generate_inner_image(self, message, dataset=None):
-        content, images = "", []
+        content_inj, content_mult, content_eval, images = "",[],"", []
         image_sizes = []
 
-        for msg in message:
+        for msg in message[0]:
             if msg["type"] == "text":
-                content += msg["value"]
+                content_inj += msg["value"]
             elif msg["type"] == "image":
                 img = Image.open(msg["value"]).convert("RGB")
                 images.append(img)
                 image_sizes.append(img.size)
-                content += self.DEFAULT_IMAGE_TOKEN + "\n"
+                content_inj += self.DEFAULT_IMAGE_TOKEN + "\n"
 
-        conversation = [
+        message_mult = [item for sublist in message[1] for item in sublist]
+        for msg in message_mult: 
+            if msg["type"] == "text":
+                content_mult.append(msg["value"])
+            elif msg["type"] == "image":
+                img = Image.open(msg["value"]).convert("RGB")
+                images.append(img)
+                image_sizes.append(img.size)
+                content_mult.append(self.DEFAULT_IMAGE_TOKEN + "\n")
+
+        for msg in message[2]:
+            if msg["type"] == "text":
+                content_eval += msg["value"]
+            elif msg["type"] == "image":
+                img = Image.open(msg["value"]).convert("RGB")
+                images.append(img)
+                image_sizes.append(img.size)
+                content_eval += self.DEFAULT_IMAGE_TOKEN + "\n"
+
+        # Injection
+        conversation_inj = [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": content},
-                ],
+                "content": [{"type": "text", "text": content_inj}]
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I got it."}]
+            },
+        ]
+
+        # Multi-turn
+        conversation_mult = []
+        roles = ["user", "assistant"]
+        role_idx = 0  
+        merged_content = []
+        for msg in content_mult:
+            if msg == self.DEFAULT_IMAGE_TOKEN + "\n":
+                merged_content.append(msg.strip())
+            else:
+                if merged_content:
+                    msg = "".join(merged_content) + msg
+                    merged_content = []
+                conversation_mult.append({
+                    "role": roles[role_idx % 2], 
+                    "content": [{"type": "text", "text": msg}]
+                })
+                role_idx += 1 
+                        
+        # Eval
+        conversation_eval= [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": content_eval}],
             }
         ]
-        prompt = self.processor.apply_chat_template(conversation, add_generation_prompt=True)
+
+        inj_prompt = self.processor.apply_chat_template(conversation_inj, add_generation_prompt=False)
+
+        if content_mult != []:
+            mult_prompt = self.processor.apply_chat_template(conversation_mult, add_generation_prompt=False)
+            mult_prompt = self.format_mult_prompt(mult_prompt)
+        else:
+            mult_prompt = ""
+
+        eval_prompt = self.processor.apply_chat_template(conversation_eval, add_generation_prompt=True)
+
+        prompt = inj_prompt+ mult_prompt + eval_prompt
+
+        print(prompt)
+        
         inputs = self.processor(images=images, text=prompt, return_tensors="pt").to('cuda', torch.float16)
 
         output = self.model.generate(**inputs, max_new_tokens=3)
-        return self.processor.decode(output[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        output = self.processor.decode(output[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        print(output)
+        return output
 
     def generate_inner_video(self, message, dataset=None):
         content, text_content, visual_content, videos = "", "", "", []

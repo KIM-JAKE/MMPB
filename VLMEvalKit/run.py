@@ -5,6 +5,7 @@ import torch.distributed as dist
 
 import wandb
 import sys
+import random
 
 from vlmeval.config import supported_VLM
 from vlmeval.dataset.video_dataset_config import supported_video_datasets
@@ -158,15 +159,15 @@ You can launch the evaluation by setting either --data and --model or --config.
 
     # injection prompts
     parser.add_argument('--injection_prompt_description_first', type=bool, default=True, help='if true, description+preference, else preference+description')
-    parser.add_argument('--injection_explicit_prompt', type=bool, default=False, help='if true, inject explicit prompt')
-    parser.add_argument('--injection_prompt_type', type=str, default="hard_moderate", help='hard_simple, hard_moderate, hard_detailed, image')
+    parser.add_argument('--injection_preference_prompt_type', type=str, default="explicit", help='explicit, intrinsic')
+    parser.add_argument('--injection_description_prompt_type', type=str, default="hard_moderate", help='hard_simple, hard_moderate, hard_detailed, image')
     parser.add_argument('--injection_prompt_n_concepts', type=int, default=1, help='number of concepts to input')
-    parser.add_argument('--injection_prompt_n_images', type=int, default=5, help='only for image propting, ranging from 1~5')
+    parser.add_argument('--injection_prompt_n_images', type=int, default=2, help='only for image propting, ranging from 1~5')
     parser.add_argument('--injection_prompt_location', type=str, default="start", help='start, middle, end')
 
     # multi-turn generic prompts
     parser.add_argument('--generic_conversation_type', type=str, default="text", help='text, vision, concept')
-    parser.add_argument('--generic_conversation_n_turn', type=int, default=5, help='1~10')
+    parser.add_argument('--generic_conversation_n_turn', type=int, default=10, help='1~10')
 
     # prompting methods
     parser.add_argument(
@@ -183,10 +184,7 @@ You can launch the evaluation by setting either --data and --model or --config.
         ],
         default="zero_shot",
         help='Choose a prompting method right before the inference from: Zero-shot, Remind + Zero-shot, Zero-shot CoT, Few-shot, Few-shot CoT, Self-critic, PanelGPT, RAG'
-    )
-    
-    
-
+    )   
     args = parser.parse_args()
     return args
 
@@ -231,16 +229,26 @@ def main():
         )
 
     for _, model_name in enumerate(args.model):
+        
+        if args.injection_description_prompt_type != "image": 
+            wandb_name = f"inj-{args.injection_description_prompt_type}_mult-{args.generic_conversation_type}-{args.generic_conversation_n_turn}turn_eval-{args.prompting_methods}"
+        else: 
+            wandb_name = f"inj-{args.injection_description_prompt_type}-{args.injection_prompt_n_images}images_mult-{args.generic_conversation_type}-{args.generic_conversation_n_turn}turn_eval-{args.prompting_methods}"
 
+        # Init Wandb
         wandb.init(
             project=args.wandb_exp_name, # Project name
-            name=model_name,         
+            name= f"{model_name}_{wandb_name}",        
             reinit=True              
         )
 
+        # Arguments
+        wandb.config.update(vars(args))
+
         model = None
         date, commit_id = timestr('day'), githash(digits=8)
-        eval_id = f"T{date}_G{commit_id}"
+        random_number = random.randint(1000, 9999)
+        eval_id = f"T{date}_G{commit_id}_{random_number}"
 
         pred_root = osp.join(args.work_dir, model_name, eval_id)
         pred_root_meta = osp.join(args.work_dir, model_name)
@@ -280,8 +288,14 @@ def main():
                     # If distributed, first build the dataset on the main process for doing preparation works
                     if world_size > 1:
                         if rank == 0:
+                            dataset_kwargs.update(vars(args))
                             dataset = build_dataset(dataset_name, **dataset_kwargs)
                         dist.barrier()
+
+                    # for arg in args:
+                    #     dataset_kwargs[arg[0]] = arg[1]
+                    dataset_kwargs.update(vars(args))
+
 
                     dataset = build_dataset(dataset_name, **dataset_kwargs)
                     if dataset is None:

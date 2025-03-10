@@ -4,7 +4,8 @@ from transformers import AutoModelForCausalLM
 from ..base import BaseModel
 from ...dataset import DATASET_TYPE, DATASET_MODALITY
 from ...smp import *
-
+from typing import List, Union, Callable, Optional, Dict
+import PIL.Image
 
 class Ovis(BaseModel):
     INSTALL_REQ = False
@@ -470,22 +471,143 @@ class Ovis2(BaseModel):
             response = _extract_answer(response)
 
         return response
+    
+    def preprocess_inputs(
+        self,
+        text_or_conversations: Union[List[Dict], str],
+        images: Optional[List[PIL.Image.Image]],
+        max_partition=9,
+        generation_preface='',
+        return_labels=False,
+        propagate_exception=True,
+        frame_selector=None,
+        frame_selector_kwargs=None
+    ):
+        # Model Constants
+        IGNORE_ID = -100
+        IMAGE_TOKEN_ID = -200
 
+        # convert text to conversations
+        if isinstance(text_or_conversations, str):
+            conversations = [{
+                "from": "human",
+                "value": text_or_conversations
+            }]
+
+        elif isinstance(text_or_conversations, list):
+            # Injection
+            conversations = [{
+                "from": "human",
+                "value": text_or_conversations[0][0]  
+            },
+            {
+                "from": "gpt",
+                "value": "I got it."
+            }]
+
+            # Multi-turn
+            texts_mult = text_or_conversations[1]  
+            for i, text in enumerate(texts_mult):
+                conversations.append({
+                    "from": "human" if i % 2 == 0 else "gpt",
+                    "value": text
+                })
+
+            # Eval
+            conversations.append({
+                "from": "human",
+                "value": text_or_conversations[2]  
+            })
+
+        else:
+            raise ValueError(f'Invalid type of `text_or_conversations`, expected `List[Dict]` or `str`,'
+                             f' but got {type(text_or_conversations)}')
+
+        if frame_selector is not None:
+            frame_selector_kwargs = frame_selector_kwargs or {}
+            conversations, images = frame_selector(conversations=conversations, frames=images, **frame_selector_kwargs)
+
+        # format conversations
+        prompt, raw_input_ids, raw_labels = self.model.get_conversation_formatter().format(
+            conversations, generation_preface=generation_preface)
+
+        # place image placeholders
+        input_ids = []
+        labels = []
+        pixel_values = []
+        invalidate_label = False
+        image_token_indices = [i for i, v in enumerate(raw_input_ids) if v == IMAGE_TOKEN_ID]
+        last_image_token_index = -1
+        for i in range(len(image_token_indices)):
+            head = 0 if i == 0 else image_token_indices[i - 1] + 1
+            tail = image_token_indices[i]
+            last_image_token_index = tail
+            input_ids.extend(raw_input_ids[head:tail])
+            labels.extend(raw_labels[head:tail])
+            try:
+                image = images[i]
+                raw_pixel_values, image_placeholders = self.model.visual_tokenizer.preprocess_image(
+                    image, max_partition=max_partition)
+            except Exception as e:
+                if propagate_exception:
+                    raise e
+                logging.exception(e)
+                invalidate_label = True
+                raw_pixel_values, image_placeholders = self.model.visual_tokenizer.mock_input()
+            input_ids.extend(image_placeholders)
+            labels.extend([IGNORE_ID] * len(image_placeholders))
+            pixel_values.append(raw_pixel_values)
+        input_ids.extend(raw_input_ids[last_image_token_index + 1:])
+        labels.extend(raw_labels[last_image_token_index + 1:])
+
+        # return tensors
+        input_ids = torch.tensor(input_ids, dtype=torch.long)
+        labels = torch.tensor([IGNORE_ID] * len(labels) if invalidate_label else labels, dtype=torch.long)
+        pixel_values = torch.cat(pixel_values, dim=0) if len(pixel_values) > 0 else None
+
+        if return_labels:
+            return prompt, input_ids, pixel_values, labels
+        else:
+            return prompt, input_ids, pixel_values
+        
     def prepare_inputs(self, message, dataset=None):
         # build query
-        images = [x['value'] for x in message if x['type'] == 'image']
-        texts = [x['value'] for x in message if x['type'] == 'text']
+
+        inj_image_cnt = len([item for item in message[0] if item.get('type') == 'image'])
+        images = [
+                    x['value']
+                    for msg in message
+                    for x in (list(msg) if isinstance(msg, tuple) else msg)
+                    if isinstance(x, dict) and x.get('type') == 'image'
+                ]
+        
+        texts_inj = [x['value'] for x in message[0] if x['type'] == 'text']
+        # Multi turn
+        message_mult = [item for sublist in message[1] for item in sublist]
+        if message_mult != []:
+            texts_mult = [x['value'] for x in message_mult if x['type'] == 'text']
+        else: 
+            texts_mult = []
+        # Eval
+        texts_eval = [x['value'] for x in message[2] if x['type'] == 'text']
+
+        texts = [texts_inj,texts_mult,texts_eval]
+
         if DATASET_MODALITY(dataset) == 'VIDEO': # video inputs
             chunks = [self.image_placeholder for x in message if x['type'] != 'text']
             chunks += [x['value'].strip() for x in message if x['type'] == 'text' and x['value'] != '']
             query = '\n'.join(chunks)
-        elif len(images) == 0: # text-only inputs
+        elif len(images) == 0: # text-only inputs, MAYBE NOT USED IN MMPB
             query = '\n'.join(texts)
-        elif len(images) == 1 and len(texts) == 1: # single-image inputs
-            query = self.image_placeholder + '\n' + texts[0]
+        #### MMPB ACTIVATE THIS when single-image
+        elif len(images) == 1 and len(texts) == 3: # single-image inputs in MMPB
+            texts[2] =  self.image_placeholder + '\n' + texts[2][0]
+            query = texts
         else:  # interleaved inputs
-            chunks = [x['value'].strip() if x['type'] == 'text' else self.image_placeholder for x in message]
-            query = '\n'.join(chunks)
+            texts[0] = "".join([self.image_placeholder for i in range(inj_image_cnt)]) + "\n" + texts[0][0]
+            texts[2] = self.image_placeholder + '\n' + texts[2][0]
+
+            query = texts
 
         # preprocess inputs
         if DATASET_MODALITY(dataset) == 'VIDEO':
@@ -496,9 +618,12 @@ class Ovis2(BaseModel):
             max_partition = 12
         else:
             max_partition = 9
-        prompt, input_ids, pixel_values = self.model.preprocess_inputs(
+
+        prompt, input_ids, pixel_values = self.preprocess_inputs(
             query, [Image.open(image) for image in images], max_partition=max_partition, frame_selector=self.frame_selector
         )
+
+        print(prompt)
 
         # move to self.device
         attention_mask = torch.ne(input_ids, self.text_tokenizer.pad_token_id)

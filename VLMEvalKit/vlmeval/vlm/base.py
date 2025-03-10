@@ -97,7 +97,7 @@ class BaseModel:
         else:
             return None
 
-    def generate(self, message, dataset=None):
+    def generate(self, message, model, dataset=None):
         """Generate the output message.
 
         Args:
@@ -107,12 +107,16 @@ class BaseModel:
         Returns:
             str: The generated message.
         """
-        assert self.check_content(message) in ['str', 'dict', 'liststr', 'listdict'], f'Invalid input type: {message}'
-        message = self.preproc_content(message)
-        assert message is not None and self.check_content(message) == 'listdict'
-        for item in message:
-            assert item['type'] in self.allowed_types, f'Invalid input type: {item["type"]}'
-        return self.generate_inner(message, dataset)
+        # assert self.check_content(message) in ['str', 'dict', 'liststr', 'listdict'], f'Invalid input type: {message}'
+        # message = self.preproc_content(message)
+        # assert message is not None and self.check_content(message) == 'listdict'
+        # for item in message:
+        #     assert item['type'] in self.allowed_types, f'Invalid input type: {item["type"]}'
+        
+        if any(keyword in model for keyword in ["InternVL2_5", "llava_v1.5", "deepseek"]):
+            return self.chat(message, dataset)
+        else: # Qwen, LLaVA-NeXT, LLaVA-OV, OVIS
+            return self.generate_inner(message, dataset)
 
     def chat(self, messages, dataset=None):
         """The main function for multi-turn chatting. Will call `chat_inner` with the preprocessed input messages."""
@@ -139,17 +143,44 @@ class BaseModel:
         warnings.warn(
             f'Model {model_name} does not support interleaved input. '
             'Will use the first image and aggregated texts as prompt. ')
-        num_images = len([x for x in message if x['type'] == 'image'])
+        # num_images = len([x for x in message if x['type'] == 'image'])
+        # Pseudo 
+        num_images = 999
+        # Not activated in MMPB
         if num_images == 0:
             prompt = '\n'.join([x['value'] for x in message if x['type'] == 'text'])
             image = None
+        # Here when MMPB
         else:
-            prompt = '\n'.join([x['value'] for x in message if x['type'] == 'text'])
-            images = [x['value'] for x in message if x['type'] == 'image']
+            prompt_inj = '\n'.join([x['value'] for x in message[0] if x['type'] == 'text'])
+            
+            message_mult = [item for sublist in message[1] for item in sublist]
+            prompt_mult =[]
+            for msg in message_mult: 
+                if msg["type"] == "text":
+                    prompt_mult.append(msg['value'])
+
+            prompt_eval = '\n'.join([x['value'] for x in message[2] if x['type'] == 'text'])
+
+            prompt = [prompt_inj, prompt_mult, prompt_eval]
+
+            images_inj = [x['value'] for x in message[0] if x['type'] == 'image']
+            images_mult = []
+            for msg in message_mult: 
+                if msg["type"] == "image":
+                    images_mult.extend(msg['value'])
+            images_eval =[x['value'] for x in message[2] if x['type'] == 'image']
+            
+            images = [images_inj, images_mult, images_eval]
+            
             if 'BLINK' == dataset:
                 image = concat_images_vlmeval(images, target_size=512)
+            # Only Llama3.2
+            elif dataset == "MMPB" : 
+                image = images
             else:
                 image = images[0]
+
         return prompt, image
 
     def message_to_promptvideo(self, message):

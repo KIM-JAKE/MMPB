@@ -136,10 +136,10 @@ def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, ap
         # if hasattr(model, 'use_custom_prompt') and model.use_custom_prompt(dataset_name):
         #     struct = model.build_prompt(data.iloc[i], dataset=dataset_name)
         # else:
-        struct = dataset.build_prompt(data.iloc[i])
+        struct = dataset.build_prompt(data.iloc[i], data)
         # print(struct)
 
-        response = model.generate(message=struct, dataset=dataset_name)
+        response = model.generate(message=struct, dataset=dataset_name, model=model_name)
         torch.cuda.empty_cache()
 
         if verbose:

@@ -183,11 +183,25 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         messages = []
         if self.system_prompt is not None:
             messages.append({'role': 'system', 'content': self.system_prompt})
-        messages.append({'role': 'user', 'content': self._prepare_content(message, dataset=dataset)})
+
+        ## Injection
+        messages.append({'role': 'user', 'content': self._prepare_content(message[0], dataset=dataset)})
+
+        ## Multi-turn
+        for user_msg, assistant_msg in message[1]:
+
+            messages.append({'role': 'user', 'content': self._prepare_content([user_msg], dataset=dataset)})
+            messages.append({'role': 'assistant', 'content': self._prepare_content([assistant_msg], dataset=dataset)})
+
+        ## Final Query
+        messages.append({'role': 'user', 'content': self._prepare_content(message[2], dataset=dataset)})
+        
         if self.verbose:
             print(f'\033[31m{messages}\033[0m')
 
         text = self.processor.apply_chat_template([messages], tokenize=False, add_generation_prompt=True)
+        print(text)
+
         images, videos = process_vision_info([messages])
         inputs = self.processor(text=text, images=images, videos=videos, padding=True, return_tensors='pt')
         inputs = inputs.to('cuda')

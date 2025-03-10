@@ -55,8 +55,11 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
     """Process JSON data and return formatted rows."""
     rows = []
     preference_prompt = preferences.get(human_name, "Unknown preferences")
-    description_prompt = next((desc["description"] for desc in descriptions if desc["person"] == human_name), "Unknown description")
-    prompt = description_prompt + preference_prompt
+    description_simple_prompt = next((desc["description"] for desc in descriptions['simple'] if desc["person"] == human_name), "Unknown description")
+    description_moderate_prompt = next((desc["description"] for desc in descriptions['moderate'] if desc["person"] == human_name), "Unknown description")
+    description_detailed_prompt = next((desc["description"] for desc in descriptions['detailed'] if desc["person"] == human_name), "Unknown description")
+        
+    # prompt = description_prompt + preference_prompt
     
     if data:
         iterable = data.items() if category == "preference" else [(None, data)]
@@ -88,7 +91,10 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
                             concept if category == "preference" else "",  # concept for preference
                             details.get("Target", ""),
                             human_name,  # name
-                            prompt  # prompt
+                            preference_prompt,  # prompt
+                            description_simple_prompt,
+                            description_moderate_prompt,
+                            description_detailed_prompt
                         ]
                         rows.append(row)
                         index += 1
@@ -126,7 +132,10 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
                         concept if category == "preference" else "",  # concept for preference
                         queries.get('Target', ""),
                         human_name,  # name
-                        prompt  # prompt
+                        preference_prompt,  # prompt
+                        description_simple_prompt,
+                        description_moderate_prompt,
+                        description_detailed_prompt
                     ]
                     rows.append(row)
                     index += 1
@@ -134,13 +143,13 @@ def process_json_data(data, human_name, attribute, category, l2_category, prefer
 
 def json_to_csv(base_path, preferences_file, descriptions_file, csv_file):
     """Convert multiple JSON files into a single CSV file."""
-    headers = ["index", "question", "A", "B", "C", "D", "image_path", "answer", "attribute", "category", "l2-category", "concept", "target", "name", "prompt"]
+    headers = ["index", "question", "A", "B", "C", "D", "image_path", "answer", "attribute", "category", "l2-category", "concept", "target", "name", "preference", "description_simple", "description_moderate", "description_detailed"]
     rows = []
     index = 1
     
     # Load human preferences and descriptions
     preferences = load_json(preferences_file) or {}
-    descriptions = load_json(descriptions_file) or []
+    descriptions = load_json(descriptions_file) or {}
     
     attributes = ["human", "animal", "character", "object"]
     categories = ["preference", "recognition"]

@@ -1136,18 +1136,67 @@ class MMPB(ImageBaseDataset):
     #     'MathVision': '93f6de14f7916e598aa1b7165589831e',
     #     'MathVision_MINI': '060fe4fa5d868987ce179307bd5f8a33'
     # }
-    def __init__(self, dataset='MMBench', skip_noimg=True):
+    def __init__(self, dataset='MMBench', skip_noimg=True, **dataset_kwargs):
         self.dataset_name = dataset
-        self.data_path = "/workspace/MMPB/dataset2.csv"
+        self.data_path = "/workspace/MMPB/dataset3.csv"
         # self.preference_path = "/workspace/MMPB/human/human_total_preference.json"
         self.dataset_path = "/workspace/MMPB"
+        self.multi_turn_base_path = "/workspace/MMPB/multi_turn"
+        self.eval_prompting_path = "/workspace/MMPB/eval_prompt/eval_prompt.csv"
         # with open(self.preference_path, "r", encoding="utf-8") as file:
         #     self.total_preferences = json.load(file)
 
-        self.data = load(self.data_path)        
+        self.data = load(self.data_path)
+        # self.mt_data = load(self.multi_turn_path)   
+        self.model = dataset_kwargs.get("model", None)[0]
+
+        self.injection_prompt_description_first = dataset_kwargs.get("injection_prompt_description_first", None)
+        self.injection_preference_prompt_type = dataset_kwargs.get("injection_preference_prompt_type", None)
+        self.injection_description_prompt_type = dataset_kwargs.get("injection_description_prompt_type", None)
+        self.injection_prompt_n_concepts = dataset_kwargs.get("injection_prompt_n_concepts", None)
+        self.injection_prompt_n_images = dataset_kwargs.get("injection_prompt_n_images", None)
+        self.injection_prompt_location = dataset_kwargs.get("injection_prompt_location", None)
+
+        self.generic_conversation_type = dataset_kwargs.get("generic_conversation_type", None)
+        self.generic_conversation_n_turn = dataset_kwargs.get("generic_conversation_n_turn", None)
+
+        self.prompting_methods = dataset_kwargs.get("prompting_methods", None)
+
+        # Preparing Multi-turn conversation ###############
+        if self.generic_conversation_type == 'text':
+            self.multi_turn_path = osp.join(self.multi_turn_base_path, 'generic_text', 'multi_turn_conversation.json')
+            self.mt_data = load(self.multi_turn_path)
+
+        elif self.generic_conversation_type == 'vision':       
+            self.multi_turn_path = osp.join(self.multi_turn_base_path, 'VQA', 'multi_turn_conversation.json')
+            self.mt_data = load(self.multi_turn_path)
+
+        elif self.generic_conversation_type == 'concept':
+            self.multi_turn_path = osp.join(self.multi_turn_base_path, 'related_text', 'multi_turn_conversation.json')
+            self.mt_data = load(self.multi_turn_path)
+        
+        else:
+            raise ValueError(f"Unsupported conversation type: {self.generic_conversation_type}")
+
+        # Prompting methods
+        self.eval_prompting = load(self.eval_prompting_path)
+
+        # First Conversation + multi-turn
+        if self.generic_conversation_n_turn > 0:
+
+            # Test 200 turn
+            # merged_conversation = []
+            # for conv in self.mt_data["conversation"][:200]:
+            #     merged_conversation.extend(conv) 
+            # self.mt_data = merged_conversation
+
+            self.mt_data = self.mt_data['conversation'][0][:self.generic_conversation_n_turn*2] 
+        else:
+            self.mt_data = [] 
+        #####################################################
+
         # self.data = self.data[(self.data['attribute'] == 'human') & (self.data['category'] == 'preference') & (self.data['l2-category'] != "inconsistency")]
-        # For testing WandB
-        # self.data = self.data.iloc[:2]
+        
         print(self.data)
         self.meta_only = False
     
@@ -1158,22 +1207,79 @@ class MMPB(ImageBaseDataset):
 
         return tgt_path
     
-    @classmethod
-    def build_prompt(self, line):
+    # @classmethod
+    def build_prompt(self, line, data):
         if isinstance(line, int):
             line = self.data.iloc[line]
         
         tgt_path = toliststr(line['image_path'])
         for i, tgt in enumerate(tgt_path):
             tgt_path[i] = osp.join("/workspace/MMPB", tgt_path[i])
+        
+        if self.injection_description_prompt_type=="image":
+            inj_img_path = [osp.join("/workspace/MMPB", line['attribute'], "train", line['name'], f"{i}.png") for i in range(self.injection_prompt_n_images)]
+        else:
+            inj_img_path = []
 
-        prompt = line['prompt']
+       
+        if self.injection_preference_prompt_type=="explicit":
+            preference = line['preference']
+        else:
+            pass
+        
+        if self.injection_description_prompt_type=="hard_moderate":
+            description = line['description_moderate']   
+        elif self.injection_description_prompt_type=="hard_detailed":
+            description = line['description_detailed']
+        elif self.injection_description_prompt_type=="hard_simple":
+            description = line['description_simple']
+        elif self.injection_description_prompt_type=="image":
+            description = ""
+        
         category = line['category']
         l2_category = line['l2-category']
         question = line['question']
 
-        if l2_category in ['awareness','overconcept']:            
-            prompt += f'\n{question}\n'
+        msgs = []
+        # prompt =  line['prompt']
+        
+        # ## injection prompt
+        if self.injection_prompt_description_first:
+            prompt = description + " " + preference
+        else:
+            prompt =  preference + " " + description
+        
+        # Multi concept prompt
+        # if self.injection_prompt_n_concepts > 1:
+        #     idx = line['index']  
+        #     available_data = data[data['index'] != idx]  
+
+        #     sample_size = self.injection_prompt_n_concepts
+        #     if len(available_data) < sample_size:
+        #         sample_size = len(available_data)
+
+        #     random_rows = available_data.sample(n=sample_size)
+
+        #     # 각 행마다 순차적으로 번호를 붙여서 리스트 생성 (각 줄 앞에 번호를 붙임)
+        #     lines = []
+        #     for i, (_, row) in enumerate(random_rows.iterrows()):
+        #         # 각 행의 description_moderate와 preference를 합쳐 문자열 생성 후, 번호 붙임
+        #         line_text = row['description_moderate'] + " " + row['preference']
+        #         lines.append(f"<sks_{i}> {line_text}")
+
+        #     # 모든 줄을 줄바꿈으로 합침
+        #     add_prompt = "\n".join(lines)
+            
+        #     if add_prompt:
+        #         prompt = prompt + "\n" + add_prompt  
+
+        final_query = ""
+        if l2_category in ['awareness','overconcept']:       
+            final_query += f'\n{question}\n'
+            
+            # if self.prompting_methods != 'zero_shot:
+            # eval_prompt = self.eval_prompting[self.prompting_methods]
+            # final_query = eval_prompt + " " + final_query
 
         elif l2_category in ['inconsistency']:   
             options = {
@@ -1185,24 +1291,80 @@ class MMPB(ImageBaseDataset):
             for key, item in options.items():
                 options_prompt += f'{key}. {item}\n'        
               
-            prompt += f'\n{question}\n'
+            final_query += f'\n{question}\n'
             if len(options):
-                prompt += options_prompt
-                prompt += ' Answer with a single letter\n'
-            # prompt += 'Please select the correct answer from the options above. \n'
-        
-        # prompt += 'Also explain the reason for your decision. \n'
+                final_query += options_prompt
+                final_query += ' Answer with a single letter\n'   
+            
+            # if self.prompting_methods != 'zero_shot' :   
+            # eval_prompt = self.eval_prompting[self.prompting_methods]
+            # final_query = eval_prompt + " " + final_query
 
-        msgs = []
-        if isinstance(tgt_path, list):
-            msgs.extend([dict(type='image', value=p) for p in tgt_path])
-        else:
-            msgs = [dict(type='image', value=tgt_path)]
-        msgs.append(dict(type='text', value=prompt))
-        
-        # print(msgs)
+        if any(keyword in self.model for keyword in ["Qwen", "llava_next", "onevision", "Ovis", "Llama"]): # generate_inner
+            # Injection
+            ## Image Injection
+            msg_injection = []
+            if self.injection_description_prompt_type=="image":
+                if isinstance(inj_img_path, list):
+                    msg_injection.extend([dict(type='image', value=p) for p in inj_img_path])
+                else:
+                    msg_injection.extend([dict(type='image', value=inj_img_path)])
+                msg_injection.extend([{"type": "text", "value": f"These images presents <sks>. {preference}"}])
+                msgs.append(msg_injection)
+
+            ## Text Injection
+            else:
+                msg_injection = [dict(type='text', value=prompt)]
+                msgs.append(msg_injection)
+
+            # Multi-turn 
+            ## Todo: VQA (type = "image")
+            # if self.generic_conversation_type == 'vision':
+            #     vqa_input_image = 
+
+            multi_turn_pairs = [
+                (dict(type='text', value=self.mt_data[i]["content"]), dict(type='text', value=self.mt_data[i+1]["content"])) 
+                for i in range(0, len(self.mt_data), 2)
+            ]
+            msgs.append(multi_turn_pairs)
+
+            # vqa multi-turn
+            # if self.generic_conversation_type == 'vision':
+            #   if self.generic_conversation_n_turn > 0:
+            #       multi_turn_pairs = [
+            #           (dict(type='text', value=self.mt_data[i]["content"]), dict(type='text', value=self.mt_data[i+1]["content"])) 
+            #           for i in range(0, len(self.mt_data), 2)
+            #       ]
+            #   msgs.append(multi_turn_pairs)
+
+            # Eval query
+            msg_final_query = []
+            if isinstance(tgt_path, list):
+                msg_final_query.extend([dict(type='image', value=p) for p in tgt_path])
+            else:
+                msg_final_query.extend([dict(type='image', value=tgt_path)])
+            msg_final_query.append(dict(type='text', value=final_query))
+            msgs.append(msg_final_query)                
+
+        elif any(keyword in self.model for keyword in ["InternVL2_5", "llava_v1.5", "deepseek"]): # chat_inner
+            # Injection
+            if self.injection_description_prompt_type=="image":
+                msgs.append({'role': 'user', 'content': [img_path for img_path in inj_img_path] + [f"These images presents <sks>. {preference}"]})
+                msgs.append({'role': 'assistant', 'content': 'I got it.'})
+            else:
+                msgs.append({'role': 'user', 'content': prompt})
+                msgs.append({'role': 'assistant', 'content': 'I got it.'})
+
+            # Multi-turn
+            for i in range(0, len(self.mt_data), 2) :
+                msgs.append({'role': 'user', 'content': self.mt_data[i]["content"]}) 
+                msgs.append({'role': 'assistant', 'content': self.mt_data[i+1]["content"]})
+
+            # Eval query
+            msgs.append({'role': 'user', 'content': [tgt_path[0], final_query]})
 
         return msgs
+
     
     def evaluate(self, eval_file, **judge_kwargs):
         from .utils.multiple_choice import (
